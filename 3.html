@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#04121c">
+<title>Jarvis</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#04121c;--panel:#08202f;--line:#1b5a73;--cyan:#3de0ff;--amber:#ffb347;--text:#d4f3ff}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:radial-gradient(circle at 50% 30%,#0a2c40,var(--bg) 65%);color:var(--text);font-family:Rajdhani,system-ui,sans-serif;font-size:19px;display:flex;flex-direction:column;align-items:center;padding:env(safe-area-inset-top) 18px env(safe-area-inset-bottom)}
+h1{font-size:24px;letter-spacing:.14em;margin-top:18px}
+main{flex:1;width:100%;max-width:480px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;text-align:center}
+#orb{width:150px;height:150px;border-radius:50%;border:3px solid var(--cyan);background:radial-gradient(circle,#0d4a63,var(--panel));color:var(--cyan);font:700 22px Rajdhani,sans-serif;box-shadow:0 0 30px var(--cyan),inset 0 0 24px #1b8aa8;cursor:pointer}
+#orb.live{border-color:var(--amber);color:var(--amber);box-shadow:0 0 40px var(--amber),inset 0 0 24px #a86a1b;animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{50%{transform:scale(1.07)}}
+#state{color:var(--cyan);min-height:1.3em}
+#heard{color:var(--amber);min-height:1.3em;font-size:21px}
+#card{width:100%;min-height:96px;max-height:38vh;overflow-y:auto;padding:14px 16px;border:1px solid var(--cyan);background:var(--panel);line-height:1.35;text-align:left;clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px))}
+#card a{display:inline-block;margin-top:10px;padding:8px 14px;border:1px solid var(--amber);color:var(--amber);text-decoration:none;font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;width:100%;max-width:480px;padding:8px 0}
+.chip{background:var(--panel);color:var(--text);border:1px solid var(--line);padding:8px 12px;font:inherit;font-size:16px;cursor:pointer}
+form{display:flex;gap:8px;width:100%;max-width:480px;padding:4px 0 14px}
+input{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);color:var(--text);padding:12px;font:inherit;font-size:18px}
+form button{background:var(--panel);color:var(--cyan);border:1px solid var(--cyan);padding:0 16px;font:inherit;font-weight:700}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--amber)}
+@media (prefers-reduced-motion:reduce){#orb.live{animation:none}}
+</style>
+</head>
+<body>
+<h1>JARVIS</h1>
+<main>
+  <button id="orb" aria-label="Tap to speak">Tap to talk</button>
+  <div id="state">Ready</div>
+  <div id="heard"></div>
+  <div id="card">Hello Prathm. Tap the circle and ask me anything, like "make a study plan for today".</div>
+</main>
+<div class="chips" id="chips"></div>
+<form id="f"><input id="t" placeholder="Or type here" autocomplete="off"><button type="submit">Send</button></form>
+<script>
+const CAT = new Date("2026-11-29T00:00:00");
+const $ = id => document.getElementById(id);
+const WORKER = "https://black-violet-ce42.prathm7796.workers.dev";
+let history = [];
+const card = $("card"), heard = $("heard"), state = $("state"), orb = $("orb");
+
+function say(text, link){
+  card.textContent = text;
+  if(link){
+    const a = document.createElement("a");
+    a.href = link.url; a.target = "_blank"; a.rel = "noopener";
+    a.textContent = link.label;
+    card.appendChild(document.createElement("br"));
+    card.appendChild(a);
+  }
+  try{
+    if(window.speechSynthesis){ speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = "en-IN"; speechSynthesis.speak(u); }
+  }catch(e){}
+}
+
+const SITES = {
+  youtube:["https://www.youtube.com","YouTube"],
+  google:["https://www.google.com","Google"],
+  maps:["https://www.google.com/maps","Maps"],
+  gmail:["https://mail.google.com","Gmail"],
+  github:["https://github.com","GitHub"],
+  whatsapp:["https://web.whatsapp.com","WhatsApp"]
+};
+
+function calc(s){
+  const e = s.replace(/multiplied by|times|into|\bx\b/g,"*").replace(/divided by|over/g,"/").replace(/plus/g,"+").replace(/minus/g,"-")
+    .replace(/what is|what's|calculate|equals|\?/g,"");
+  if(!/^[\d+\-*/.() ]+$/.test(e) || !/\d\s*[+\-*/]\s*\d/.test(e)) return null;
+  try{ const r = Function('"use strict";return (' + e + ')')(); return isFinite(r) ? Math.round(r*1e6)/1e6 : null; }catch(x){ return null; }
+}
+
+async function askAI(q){
+  state.textContent = "Thinking...";
+  history.push({role:"user", text:q});
+  try{
+    const r = await fetch(WORKER, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({messages:history})});
+    const d = await r.json();
+    if(!d.text){ history.pop(); say(d.error ? "The AI had a problem: " + d.error : "I didn't get an answer. Try again."); }
+    else{
+      history.push({role:"model", text:d.text});
+      if(history.length > 12) history = history.slice(-12);
+      say(d.text.replace(/[*#_`]/g, ""));
+    }
+  }catch(e){ history.pop(); say("I couldn't reach my brain. Check your internet and try again."); }
+  state.textContent = "Ready";
+}
+
+let timer = null;
+function handle(q){
+  const s = q.toLowerCase().trim();
+  if(!s) return;
+  heard.textContent = "\u201C" + q + "\u201D";
+
+  const m = s.match(/(\d+(?:\.\d+)?)\s*(second|sec|minute|min|hour)/);
+  if(s.includes("timer") && m){
+    const n = parseFloat(m[1]), u = m[2];
+    const ms = n * (u.startsWith("h") ? 3600000 : u.startsWith("m") ? 60000 : 1000);
+    clearTimeout(timer);
+    timer = setTimeout(() => { say("Time is up!"); if(navigator.vibrate) navigator.vibrate([400,200,400]); }, ms);
+    return say("Timer set for " + n + " " + u + (n === 1 ? "" : "s") + ". Keep this page open.");
+  }
+  if(s.includes("cancel") && s.includes("timer")){ clearTimeout(timer); return say("Timer cancelled."); }
+
+  const tel = s.match(/^(?:call|dial)\s+([\d\s+\-]{7,})$/);
+  if(tel){ const num = tel[1].replace(/[^\d+]/g,""); return say("Ready to call " + num + ".", {url:"tel:" + num, label:"Call " + num}); }
+
+  if(/\bcat\b/.test(s) && /(days? left|countdown|how many days|when is)/.test(s)){
+    const d = Math.ceil((CAT - new Date())/86400000);
+    return say(d > 0 ? d + " days left until CAT on 29 November 2026." : "CAT day has arrived. Good luck!");
+  }
+  if(/^(what'?s the time|what is the time|what time|tell me the time|current time|time now)/.test(s)) return say("It is " + new Date().toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) + ".");
+  if(/^(what'?s the date|what is the date|what'?s today|what is today|today'?s date|what day|which day)/.test(s)) return say("Today is " + new Date().toLocaleDateString([], {weekday:"long", day:"numeric", month:"long", year:"numeric"}) + ".");
+
+  const play = s.match(/^(?:play|watch)\s+(.+?)(?:\s+on youtube)?$/);
+  if(play) return say("Searching YouTube for " + play[1] + ".", {url:"https://www.youtube.com/results?search_query=" + encodeURIComponent(play[1]), label:"Open YouTube results"});
+
+  const nav = s.match(/^(?:navigate to|directions to|take me to)\s+(.+)$/);
+  if(nav) return say("Opening Maps for " + nav[1] + ".", {url:"https://www.google.com/maps/search/" + encodeURIComponent(nav[1]), label:"Open in Maps"});
+
+  const op = s.match(/^(?:open|go to|launch)\s+(\w+)/);
+  if(op && SITES[op[1]]) return say("Opening " + SITES[op[1]][1] + ".", {url:SITES[op[1]][0], label:"Open " + SITES[op[1]][1]});
+
+  const r = calc(s);
+  if(r !== null) return say("That is " + r + ".");
+
+  if(/^(hi|hello|hey)\b/.test(s)) return say("Hello Prathm. How can I help?");
+
+  askAI(q);
+}
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if(!SR){
+  state.textContent = "Voice input isn't supported here. Use Chrome, or type below.";
+  orb.disabled = true;
+}else{
+  const rec = new SR();
+  rec.lang = "en-IN";
+  rec.interimResults = true;
+  let final = "";
+  rec.onstart = () => { orb.classList.add("live"); orb.textContent = "Listening"; state.textContent = "Listening..."; final = ""; heard.textContent = ""; };
+  rec.onend = () => { orb.classList.remove("live"); orb.textContent = "Tap to talk"; state.textContent = "Ready"; if(final) handle(final); };
+  rec.onerror = e => { state.textContent = e.error === "not-allowed" ? "Allow microphone access in Chrome, then try again." : "Couldn't hear you. Try again."; };
+  rec.onresult = e => {
+    let t = "";
+    for(const r of e.results){ t += r[0].transcript; if(r.isFinal) final = t; }
+    heard.textContent = "\u201C" + t + "\u201D";
+    if(!final && e.results[e.results.length-1].isFinal) final = t;
+  };
+  orb.addEventListener("click", () => { try{ speechSynthesis.cancel(); rec.start(); }catch(e){ rec.stop(); } });
+}
+
+["Make a CAT study plan for today","Explain percentages simply","CAT days left","Set a timer for 25 minutes","Open YouTube"].forEach(c => {
+  const b = document.createElement("button");
+  b.className = "chip"; b.textContent = c;
+  b.onclick = () => handle(c);
+  $("chips").appendChild(b);
+});
+
+$("f").addEventListener("submit", e => { e.preventDefault(); handle($("t").value); $("t").value = ""; });
+</script>
+</body>
+</html>
